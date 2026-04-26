@@ -8,8 +8,8 @@ df.append({"price": 102.0, "volume": 8.0})
 
 print("=====")
 
-print(df.mean("price"))
-print(df.variance("price"))
-print(df.last("price"))
+print(df.mean("price"), df.mean("volume"))
+print(df.variance("price"), df.variance("volume"))
+print(df.last("price"), df.last("volume"))
 
 print("=====")
