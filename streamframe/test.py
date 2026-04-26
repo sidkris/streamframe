@@ -1,6 +1,6 @@
-import streamframe
+import streamframe as sf
 
-df = streamframe.StreamFrame(["price"], 3)
+df = sf.StreamFrame(["price"], 3)
 
 df.append({"price": 100.0})
 df.append({"price": 200.0})
