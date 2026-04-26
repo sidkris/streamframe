@@ -1,15 +1,16 @@
 import streamframe
 
-df = streamframe.StreamFrame(["price", "volume"])
+df = streamframe.StreamFrame(["price"], 3)
 
-df.append({"price": 100.0, "volume": 10.0})
-df.append({"price": 101.0, "volume": 12.0})
-df.append({"price": 102.0, "volume": 8.0})
+df.append({"price": 100.0})
+df.append({"price": 200.0})
+df.append({"price": 300.0})
+df.append({"price": 400.0})
 
 print("=====")
 
-print(df.mean("price"), df.mean("volume"))
-print(df.variance("price"), df.variance("volume"))
-print(df.last("price"), df.last("volume"))
+print(df.mean("price"))          
+print(df.rolling_mean("price"))  
+print(df.last("price"))
 
 print("=====")

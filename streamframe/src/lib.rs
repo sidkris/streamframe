@@ -1,36 +1,58 @@
 use pyo3::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 //
 // ---- COLUMN ----
 //
 
 struct Column {
+    // full history
     values: Vec<f64>,
+
+    // Welford (global stats)
     count: usize,
     mean: f64,
     m2: f64,
+
+    // rolling window
+    window: VecDeque<f64>,
+    window_size: usize,
+    rolling_sum: f64,
 }
 
 impl Column {
-    fn new() -> Self {
+    fn new(window_size: usize) -> Self {
         Self {
             values: Vec::new(),
             count: 0,
             mean: 0.0,
             m2: 0.0,
+            window: VecDeque::with_capacity(window_size),
+            window_size,
+            rolling_sum: 0.0,
         }
     }
 
     fn append(&mut self, x: f64) {
+        // ---- Welford update ----
         self.count += 1;
 
-        // Welford Algo
         let delta = x - self.mean;
         self.mean += delta / self.count as f64;
         let delta2 = x - self.mean;
         self.m2 += delta * delta2;
 
+        // ---- Rolling window update ----
+        self.window.push_back(x);
+        self.rolling_sum += x;
+
+        if self.window.len() > self.window_size {
+            if let Some(old) = self.window.pop_front() {
+                self.rolling_sum -= old;
+            }
+        }
+
+        // ---- Store full history (* optional *) ----
         self.values.push(x);
     }
 
@@ -48,6 +70,13 @@ impl Column {
     fn last(&self) -> f64 {
         *self.values.last().unwrap_or(&0.0)
     }
+
+    fn rolling_mean(&self) -> f64 {
+        if self.window.is_empty() {
+            return 0.0;
+        }
+        self.rolling_sum / self.window.len() as f64
+    }
 }
 
 //
@@ -61,13 +90,12 @@ struct StreamFrame {
 
 #[pymethods]
 impl StreamFrame {
-
     #[new]
-    fn new(col_names: Vec<String>) -> Self {
+    fn new(col_names: Vec<String>, window_size: usize) -> Self {
         let mut columns = HashMap::new();
 
         for name in col_names {
-            columns.insert(name, Column::new());
+            columns.insert(name, Column::new(window_size));
         }
 
         StreamFrame { columns }
@@ -91,6 +119,13 @@ impl StreamFrame {
 
     fn last(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.last()).unwrap_or(0.0)
+    }
+
+    fn rolling_mean(&self, col: String) -> f64 {
+        self.columns
+            .get(&col)
+            .map(|c| c.rolling_mean())
+            .unwrap_or(0.0)
     }
 }
 
