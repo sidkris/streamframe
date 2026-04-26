@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 //
 
 struct Column {
-    // full history
+    // optional full history
     values: Vec<f64>,
 
     // global stats (Welford)
@@ -19,10 +19,15 @@ struct Column {
     window_size: usize,
     rolling_sum: f64,
     rolling_sum_sq: f64,
+
+    // EWMA
+    ewma: f64,
+    alpha: f64,
+    ewma_initialized: bool,
 }
 
 impl Column {
-    fn new(window_size: usize) -> Self {
+    fn new(window_size: usize, alpha: f64) -> Self {
         Self {
             values: Vec::new(),
             count: 0,
@@ -32,11 +37,14 @@ impl Column {
             window_size,
             rolling_sum: 0.0,
             rolling_sum_sq: 0.0,
+            ewma: 0.0,
+            alpha,
+            ewma_initialized: false,
         }
     }
 
     fn append(&mut self, x: f64) {
-        // ---- Welford (global stats) ----
+        // ---- Welford ----
         self.count += 1;
 
         let delta = x - self.mean;
@@ -54,6 +62,14 @@ impl Column {
                 self.rolling_sum -= old;
                 self.rolling_sum_sq -= old * old;
             }
+        }
+
+        // ---- EWMA ----
+        if !self.ewma_initialized {
+            self.ewma = x;
+            self.ewma_initialized = true;
+        } else {
+            self.ewma = self.alpha * x + (1.0 - self.alpha) * self.ewma;
         }
 
         // ---- Store (optional) ----
@@ -96,10 +112,30 @@ impl Column {
         let mean = self.rolling_sum / n as f64;
         let variance = (self.rolling_sum_sq / n as f64) - (mean * mean);
 
-        // numerical safety
         variance.max(0.0).sqrt()
     }
+
+    fn zscore(&self) -> f64 {
+        let std = self.rolling_std();
+        if std == 0.0 {
+            return 0.0;
+        }
+
+        let last = self.last();
+        let mean = self.rolling_mean();
+
+        (last - mean) / std
+    }
+
+    // ---- EWMA ----
+
+    fn ewma(&self) -> f64 {
+        self.ewma
+    }
 }
+
+
+
 
 //
 // ---- STREAM FRAME ----
@@ -113,11 +149,11 @@ struct StreamFrame {
 #[pymethods]
 impl StreamFrame {
     #[new]
-    fn new(col_names: Vec<String>, window_size: usize) -> Self {
+    fn new(col_names: Vec<String>, window_size: usize, alpha: f64) -> Self {
         let mut columns = HashMap::new();
 
         for name in col_names {
-            columns.insert(name, Column::new(window_size));
+            columns.insert(name, Column::new(window_size, alpha));
         }
 
         StreamFrame { columns }
@@ -160,7 +196,27 @@ impl StreamFrame {
             .map(|c| c.rolling_std())
             .unwrap_or(0.0)
     }
+
+    fn zscore(&self, col: String) -> f64 {
+        self.columns
+            .get(&col)
+            .map(|c| c.zscore())
+            .unwrap_or(0.0)
+    }
+
+    // ---- EWMA ----
+
+    fn ewma(&self, col: String) -> f64 {
+        self.columns
+            .get(&col)
+            .map(|c| c.ewma())
+            .unwrap_or(0.0)
+    }
 }
+
+
+
+
 
 //
 // ---- MODULE ----
