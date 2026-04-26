@@ -9,7 +9,7 @@ struct Column {
     // full history
     values: Vec<f64>,
 
-    // Welford (global stats)
+    // global stats (Welford)
     count: usize,
     mean: f64,
     m2: f64,
@@ -18,6 +18,7 @@ struct Column {
     window: VecDeque<f64>,
     window_size: usize,
     rolling_sum: f64,
+    rolling_sum_sq: f64,
 }
 
 impl Column {
@@ -30,11 +31,12 @@ impl Column {
             window: VecDeque::with_capacity(window_size),
             window_size,
             rolling_sum: 0.0,
+            rolling_sum_sq: 0.0,
         }
     }
 
     fn append(&mut self, x: f64) {
-        // ---- Welford update ----
+        // ---- Welford (global stats) ----
         self.count += 1;
 
         let delta = x - self.mean;
@@ -42,19 +44,23 @@ impl Column {
         let delta2 = x - self.mean;
         self.m2 += delta * delta2;
 
-        // ---- Rolling window update ----
+        // ---- Rolling window ----
         self.window.push_back(x);
         self.rolling_sum += x;
+        self.rolling_sum_sq += x * x;
 
         if self.window.len() > self.window_size {
             if let Some(old) = self.window.pop_front() {
                 self.rolling_sum -= old;
+                self.rolling_sum_sq -= old * old;
             }
         }
 
-        // ---- Store full history (* optional *) ----
+        // ---- Store (optional) ----
         self.values.push(x);
     }
+
+    // ---- GLOBAL ----
 
     fn mean(&self) -> f64 {
         self.mean
@@ -71,11 +77,27 @@ impl Column {
         *self.values.last().unwrap_or(&0.0)
     }
 
+    // ---- ROLLING ----
+
     fn rolling_mean(&self) -> f64 {
-        if self.window.is_empty() {
+        let n = self.window.len();
+        if n == 0 {
             return 0.0;
         }
-        self.rolling_sum / self.window.len() as f64
+        self.rolling_sum / n as f64
+    }
+
+    fn rolling_std(&self) -> f64 {
+        let n = self.window.len();
+        if n == 0 {
+            return 0.0;
+        }
+
+        let mean = self.rolling_sum / n as f64;
+        let variance = (self.rolling_sum_sq / n as f64) - (mean * mean);
+
+        // numerical safety
+        variance.max(0.0).sqrt()
     }
 }
 
@@ -109,6 +131,8 @@ impl StreamFrame {
         }
     }
 
+    // ---- GLOBAL ----
+
     fn mean(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.mean()).unwrap_or(0.0)
     }
@@ -121,10 +145,19 @@ impl StreamFrame {
         self.columns.get(&col).map(|c| c.last()).unwrap_or(0.0)
     }
 
+    // ---- ROLLING ----
+
     fn rolling_mean(&self, col: String) -> f64 {
         self.columns
             .get(&col)
             .map(|c| c.rolling_mean())
+            .unwrap_or(0.0)
+    }
+
+    fn rolling_std(&self, col: String) -> f64 {
+        self.columns
+            .get(&col)
+            .map(|c| c.rolling_std())
             .unwrap_or(0.0)
     }
 }

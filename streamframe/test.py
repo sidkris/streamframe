@@ -14,3 +14,13 @@ print(df.rolling_mean("price"))
 print(df.last("price"))
 
 print("=====")
+
+print(df.rolling_mean("price"))  
+print(df.rolling_std("price"))
+
+df.append({"price": 400})
+
+print(df.rolling_mean("price"))  
+print(df.rolling_std("price"))
+
+print("=====")
