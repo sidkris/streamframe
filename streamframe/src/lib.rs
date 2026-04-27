@@ -44,6 +44,10 @@ struct RollingStats {
     window_size: usize,
     sum: f64,
     sum_sq: f64,
+
+    // Monotonic queues
+    min_deque: VecDeque<f64>,
+    max_deque: VecDeque<f64>,
 }
 
 impl RollingStats {
@@ -53,18 +57,54 @@ impl RollingStats {
             window_size,
             sum: 0.0,
             sum_sq: 0.0,
+            min_deque: VecDeque::with_capacity(window_size),
+            max_deque: VecDeque::with_capacity(window_size),
         }
     }
 
     fn update(&mut self, x: f64) {
+        // ---- main window ----
         self.window.push_back(x);
         self.sum += x;
         self.sum_sq += x * x;
 
+        // ---- monotonic min ----
+        while let Some(&back) = self.min_deque.back() {
+            if back > x {
+                self.min_deque.pop_back();
+            } else {
+                break;
+            }
+        }
+        self.min_deque.push_back(x);
+
+        // ---- monotonic max ----
+        while let Some(&back) = self.max_deque.back() {
+            if back < x {
+                self.max_deque.pop_back();
+            } else {
+                break;
+            }
+        }
+        self.max_deque.push_back(x);
+
+        // ---- eviction ----
         if self.window.len() > self.window_size {
             if let Some(old) = self.window.pop_front() {
                 self.sum -= old;
                 self.sum_sq -= old * old;
+
+                if let Some(&front) = self.min_deque.front() {
+                    if front == old {
+                        self.min_deque.pop_front();
+                    }
+                }
+
+                if let Some(&front) = self.max_deque.front() {
+                    if front == old {
+                        self.max_deque.pop_front();
+                    }
+                }
             }
         }
     }
@@ -87,6 +127,14 @@ impl RollingStats {
         let var = (self.sum_sq / n as f64) - (mean * mean);
 
         var.max(0.0).sqrt()
+    }
+
+    fn min(&self) -> f64 {
+        *self.min_deque.front().unwrap_or(&0.0)
+    }
+
+    fn max(&self) -> f64 {
+        *self.max_deque.front().unwrap_or(&0.0)
     }
 }
 
@@ -170,6 +218,14 @@ impl Column {
 
         (last - mean) / std
     }
+
+    fn rolling_min(&self) -> f64 {
+        self.rolling.min()
+    }
+
+    fn rolling_max(&self) -> f64 {
+        self.rolling.max()
+    }
 }
 
 //
@@ -226,6 +282,14 @@ impl StreamFrame {
 
     fn rolling_std(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.rolling.std()).unwrap_or(0.0)
+    }
+
+    fn rolling_min(&self, col: String) -> f64 {
+        self.columns.get(&col).map(|c| c.rolling_min()).unwrap_or(0.0)
+    }
+
+    fn rolling_max(&self, col: String) -> f64 {
+        self.columns.get(&col).map(|c| c.rolling_max()).unwrap_or(0.0)
     }
 
     fn zscore(&self, col: String) -> f64 {
