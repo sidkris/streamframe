@@ -35,7 +35,7 @@ impl GlobalStats {
 
 //
 // ============================================================
-// ROLLING STATS (mean/std/min/max)
+// COUNT-BASED ROLLING STATS
 // ============================================================
 //
 
@@ -44,9 +44,6 @@ struct RollingStats {
     window_size: usize,
     sum: f64,
     sum_sq: f64,
-
-    min_deque: VecDeque<f64>,
-    max_deque: VecDeque<f64>,
 }
 
 impl RollingStats {
@@ -56,54 +53,18 @@ impl RollingStats {
             window_size,
             sum: 0.0,
             sum_sq: 0.0,
-            min_deque: VecDeque::with_capacity(window_size),
-            max_deque: VecDeque::with_capacity(window_size),
         }
     }
 
     fn update(&mut self, x: f64) {
-        // ---- main window ----
         self.window.push_back(x);
         self.sum += x;
         self.sum_sq += x * x;
 
-        // ---- monotonic min ----
-        while let Some(&back) = self.min_deque.back() {
-            if back > x {
-                self.min_deque.pop_back();
-            } else {
-                break;
-            }
-        }
-        self.min_deque.push_back(x);
-
-        // ---- monotonic max ----
-        while let Some(&back) = self.max_deque.back() {
-            if back < x {
-                self.max_deque.pop_back();
-            } else {
-                break;
-            }
-        }
-        self.max_deque.push_back(x);
-
-        // ---- eviction ----
         if self.window.len() > self.window_size {
             if let Some(old) = self.window.pop_front() {
                 self.sum -= old;
                 self.sum_sq -= old * old;
-
-                if let Some(&front) = self.min_deque.front() {
-                    if front == old {
-                        self.min_deque.pop_front();
-                    }
-                }
-
-                if let Some(&front) = self.max_deque.front() {
-                    if front == old {
-                        self.max_deque.pop_front();
-                    }
-                }
             }
         }
     }
@@ -122,13 +83,50 @@ impl RollingStats {
 
         var.max(0.0).sqrt()
     }
+}
 
-    fn min(&self) -> f64 {
-        *self.min_deque.front().unwrap_or(&0.0)
+//
+// ============================================================
+// TIME-BASED ROLLING STATS
+// ============================================================
+//
+
+struct TimeRollingStats {
+    window: VecDeque<(f64, i64)>,
+    duration: i64,
+    sum: f64,
+    sum_sq: f64,
+}
+
+impl TimeRollingStats {
+    fn new(duration: i64) -> Self {
+        Self {
+            window: VecDeque::new(),
+            duration,
+            sum: 0.0,
+            sum_sq: 0.0,
+        }
     }
 
-    fn max(&self) -> f64 {
-        *self.max_deque.front().unwrap_or(&0.0)
+    fn update(&mut self, x: f64, ts: i64) {
+        self.window.push_back((x, ts));
+        self.sum += x;
+        self.sum_sq += x * x;
+
+        while let Some(&(val, old_ts)) = self.window.front() {
+            if ts - old_ts > self.duration {
+                self.window.pop_front();
+                self.sum -= val;
+                self.sum_sq -= val * val;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn mean(&self) -> f64 {
+        if self.window.is_empty() { 0.0 }
+        else { self.sum / self.window.len() as f64 }
     }
 }
 
@@ -173,38 +171,31 @@ struct Column {
     values: Vec<f64>,
     global: GlobalStats,
     rolling: RollingStats,
+    time_rolling: TimeRollingStats,
     ewma: Ewma,
 }
 
 impl Column {
-    fn new(window_size: usize, alpha: f64) -> Self {
+    fn new(window_size: usize, alpha: f64, time_window: i64) -> Self {
         Self {
             values: Vec::new(),
             global: GlobalStats::new(),
             rolling: RollingStats::new(window_size),
+            time_rolling: TimeRollingStats::new(time_window),
             ewma: Ewma::new(alpha),
         }
     }
 
-    fn append(&mut self, x: f64) {
+    fn append(&mut self, x: f64, ts: i64) {
         self.global.update(x);
         self.rolling.update(x);
+        self.time_rolling.update(x, ts);
         self.ewma.update(x);
         self.values.push(x);
     }
 
     fn last(&self) -> f64 {
         *self.values.last().unwrap_or(&0.0)
-    }
-
-    fn zscore(&self) -> f64 {
-        let std = self.rolling.std();
-        if std == 0.0 { return 0.0; }
-
-        let mean = self.rolling.mean();
-        let last = self.last();
-
-        (last - mean) / std
     }
 }
 
@@ -222,40 +213,31 @@ struct StreamFrame {
 #[pymethods]
 impl StreamFrame {
     #[new]
-    fn new(col_names: Vec<String>, window_size: usize, alpha: f64) -> Self {
+    fn new(col_names: Vec<String>, window_size: usize, alpha: f64, time_window: i64) -> Self {
         let mut columns = HashMap::new();
 
         for name in col_names {
-            columns.insert(name, Column::new(window_size, alpha));
+            columns.insert(name, Column::new(window_size, alpha, time_window));
         }
 
         StreamFrame { columns }
     }
 
-    fn append(&mut self, row: HashMap<String, f64>) {
+    fn append(&mut self, row: HashMap<String, f64>, ts: i64) {
         for (key, value) in row {
             if let Some(col) = self.columns.get_mut(&key) {
-                col.append(value);
+                col.append(value, ts);
             }
         }
     }
 
-    fn append_batch(&mut self, data: HashMap<String, Vec<f64>>) {
-        let batch_size = match data.values().next() {
-            Some(v) => v.len(),
-            None => return,
-        };
-
-        for v in data.values() {
-            if v.len() != batch_size {
-                panic!("All columns must have the same length");
-            }
-        }
+    fn append_batch(&mut self, data: HashMap<String, Vec<f64>>, timestamps: Vec<i64>) {
+        let batch_size = timestamps.len();
 
         for i in 0..batch_size {
-            for (col_name, col_values) in &data {
+            for (col_name, values) in &data {
                 if let Some(col) = self.columns.get_mut(col_name) {
-                    col.append(col_values[i]);
+                    col.append(values[i], timestamps[i]);
                 }
             }
         }
@@ -274,7 +256,7 @@ impl StreamFrame {
         self.columns.get(&col).map(|c| c.last()).unwrap_or(0.0)
     }
 
-    // ROLLING
+    // COUNT-BASED
     fn rolling_mean(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.rolling.mean()).unwrap_or(0.0)
     }
@@ -283,16 +265,9 @@ impl StreamFrame {
         self.columns.get(&col).map(|c| c.rolling.std()).unwrap_or(0.0)
     }
 
-    fn rolling_min(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.rolling.min()).unwrap_or(0.0)
-    }
-
-    fn rolling_max(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.rolling.max()).unwrap_or(0.0)
-    }
-
-    fn zscore(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.zscore()).unwrap_or(0.0)
+    // TIME-BASED
+    fn time_mean(&self, col: String) -> f64 {
+        self.columns.get(&col).map(|c| c.time_rolling.mean()).unwrap_or(0.0)
     }
 
     // EWMA
