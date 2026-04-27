@@ -35,7 +35,7 @@ impl GlobalStats {
 
 //
 // ============================================================
-// ROLLING STATS (O(1))
+// ROLLING STATS (mean/std/min/max)
 // ============================================================
 //
 
@@ -45,7 +45,6 @@ struct RollingStats {
     sum: f64,
     sum_sq: f64,
 
-    // Monotonic queues
     min_deque: VecDeque<f64>,
     max_deque: VecDeque<f64>,
 }
@@ -110,18 +109,13 @@ impl RollingStats {
     }
 
     fn mean(&self) -> f64 {
-        if self.window.is_empty() {
-            0.0
-        } else {
-            self.sum / self.window.len() as f64
-        }
+        if self.window.is_empty() { 0.0 }
+        else { self.sum / self.window.len() as f64 }
     }
 
     fn std(&self) -> f64 {
         let n = self.window.len();
-        if n == 0 {
-            return 0.0;
-        }
+        if n == 0 { return 0.0; }
 
         let mean = self.sum / n as f64;
         let var = (self.sum_sq / n as f64) - (mean * mean);
@@ -152,11 +146,7 @@ struct Ewma {
 
 impl Ewma {
     fn new(alpha: f64) -> Self {
-        Self {
-            value: 0.0,
-            alpha,
-            initialized: false,
-        }
+        Self { value: 0.0, alpha, initialized: false }
     }
 
     fn update(&mut self, x: f64) {
@@ -209,22 +199,12 @@ impl Column {
 
     fn zscore(&self) -> f64 {
         let std = self.rolling.std();
-        if std == 0.0 {
-            return 0.0;
-        }
+        if std == 0.0 { return 0.0; }
 
         let mean = self.rolling.mean();
         let last = self.last();
 
         (last - mean) / std
-    }
-
-    fn rolling_min(&self) -> f64 {
-        self.rolling.min()
-    }
-
-    fn rolling_max(&self) -> f64 {
-        self.rolling.max()
     }
 }
 
@@ -260,8 +240,28 @@ impl StreamFrame {
         }
     }
 
-    // ---- GLOBAL ----
+    fn append_batch(&mut self, data: HashMap<String, Vec<f64>>) {
+        let batch_size = match data.values().next() {
+            Some(v) => v.len(),
+            None => return,
+        };
 
+        for v in data.values() {
+            if v.len() != batch_size {
+                panic!("All columns must have the same length");
+            }
+        }
+
+        for i in 0..batch_size {
+            for (col_name, col_values) in &data {
+                if let Some(col) = self.columns.get_mut(col_name) {
+                    col.append(col_values[i]);
+                }
+            }
+        }
+    }
+
+    // GLOBAL
     fn mean(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.global.mean).unwrap_or(0.0)
     }
@@ -274,8 +274,7 @@ impl StreamFrame {
         self.columns.get(&col).map(|c| c.last()).unwrap_or(0.0)
     }
 
-    // ---- ROLLING ----
-
+    // ROLLING
     fn rolling_mean(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.rolling.mean()).unwrap_or(0.0)
     }
@@ -285,19 +284,18 @@ impl StreamFrame {
     }
 
     fn rolling_min(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.rolling_min()).unwrap_or(0.0)
+        self.columns.get(&col).map(|c| c.rolling.min()).unwrap_or(0.0)
     }
 
     fn rolling_max(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.rolling_max()).unwrap_or(0.0)
+        self.columns.get(&col).map(|c| c.rolling.max()).unwrap_or(0.0)
     }
 
     fn zscore(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.zscore()).unwrap_or(0.0)
     }
 
-    // ---- EWMA ----
-
+    // EWMA
     fn ewma(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.ewma.get()).unwrap_or(0.0)
     }
