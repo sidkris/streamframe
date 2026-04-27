@@ -1,4 +1,4 @@
-import streamframe.streamframe
+import streamframe.streamframe as sf
 import time
 import random
 import os
@@ -16,7 +16,7 @@ ITERATIONS = 60
 # INIT
 # ============================================================
 
-sf = streamframe.StreamFrame(
+sf = sf.StreamFrame(
     ["latency", "errors"],
     WINDOW_SIZE,
     ALPHA,
