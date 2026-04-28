@@ -27,6 +27,3 @@ You don’t want to recompute everything every time a new value comes in.
 ```bash
 pip install streamframe
 
-
-
-![demo](assets/demo.gif)
