@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 
 authors = [
-  { name = "Sid" }
+  { name = "Siddharth Krishnan <sid@sidkrishnan.com>" }
 ]
 
 keywords = ["streaming", "real-time", "analytics", "feature-engineering"]
