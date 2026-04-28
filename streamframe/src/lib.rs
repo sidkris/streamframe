@@ -128,6 +128,24 @@ impl TimeRollingStats {
         if self.window.is_empty() { 0.0 }
         else { self.sum / self.window.len() as f64 }
     }
+
+    fn std(&self) -> f64 {
+        let n = self.window.len();
+        if n == 0 { return 0.0; }
+
+        let mean = self.sum / n as f64;
+        let var = (self.sum_sq / n as f64) - (mean * mean);
+
+        var.max(0.0).sqrt()
+    }
+
+    fn rate(&self) -> f64 {
+        if self.window.is_empty() || self.duration == 0 {
+            return 0.0;
+        }
+
+        self.window.len() as f64 / self.duration as f64
+    }
 }
 
 //
@@ -231,18 +249,6 @@ impl StreamFrame {
         }
     }
 
-    fn append_batch(&mut self, data: HashMap<String, Vec<f64>>, timestamps: Vec<i64>) {
-        let batch_size = timestamps.len();
-
-        for i in 0..batch_size {
-            for (col_name, values) in &data {
-                if let Some(col) = self.columns.get_mut(col_name) {
-                    col.append(values[i], timestamps[i]);
-                }
-            }
-        }
-    }
-
     // GLOBAL
     fn mean(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.global.mean).unwrap_or(0.0)
@@ -252,11 +258,7 @@ impl StreamFrame {
         self.columns.get(&col).map(|c| c.global.variance()).unwrap_or(0.0)
     }
 
-    fn last(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.last()).unwrap_or(0.0)
-    }
-
-    // COUNT-BASED
+    // COUNT
     fn rolling_mean(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.rolling.mean()).unwrap_or(0.0)
     }
@@ -265,12 +267,20 @@ impl StreamFrame {
         self.columns.get(&col).map(|c| c.rolling.std()).unwrap_or(0.0)
     }
 
-    // TIME-BASED
+    // TIME
     fn time_mean(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.time_rolling.mean()).unwrap_or(0.0)
     }
 
-    // EWMA
+    fn time_std(&self, col: String) -> f64 {
+        self.columns.get(&col).map(|c| c.time_rolling.std()).unwrap_or(0.0)
+    }
+
+    fn rate(&self, col: String) -> f64 {
+        self.columns.get(&col).map(|c| c.time_rolling.rate()).unwrap_or(0.0)
+    }
+
+    // TREND
     fn ewma(&self, col: String) -> f64 {
         self.columns.get(&col).map(|c| c.ewma.get()).unwrap_or(0.0)
     }

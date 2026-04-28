@@ -76,7 +76,11 @@ for i in range(ITERATIONS):
     # ---- compute metrics ----
     rolling_mean = sf.rolling_mean("latency")
     rolling_std = sf.rolling_std("latency")
+
     time_mean = sf.time_mean("latency")
+    time_std = sf.time_std("latency")       # NEW
+    rate = sf.rate("latency")               # NEW
+
     ewma = sf.ewma("latency")
 
     global_mean = sf.mean("latency")
@@ -98,9 +102,6 @@ for i in range(ITERATIONS):
             trend = "↓"
     prev_mean = rolling_mean
 
-    # ---- throughput (approx) ----
-    throughput = (i + 1) / max(1, (ts - start_time + 1))
-
     # ---- UI ----
     clear()
 
@@ -119,13 +120,14 @@ for i in range(ITERATIONS):
 
     print("\n--- TIME WINDOW (last T seconds) ---")
     print(f"time_mean : {time_mean:.2f}")
+    print(f"time_std  : {time_std:.2f}")
+    print(f"rate      : {rate:.2f} events/sec")
 
     print("\n--- TREND ---")
     print(f"ewma      : {ewma:.2f}")
 
     print("\n--- SYSTEM ---")
     print(f"error_rate : {error_rate:.2f}")
-    print(f"throughput : ~{throughput:.2f} events/sec")
 
     print("\n--- SIGNALS ---")
 
