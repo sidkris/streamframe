@@ -186,7 +186,7 @@ impl Ewma {
 //
 
 struct Column {
-    values: Vec<f64>,
+    last: f64,
     global: GlobalStats,
     rolling: RollingStats,
     time_rolling: TimeRollingStats,
@@ -196,7 +196,7 @@ struct Column {
 impl Column {
     fn new(window_size: usize, alpha: f64, time_window: i64) -> Self {
         Self {
-            values: Vec::new(),
+            last: 0.0,
             global: GlobalStats::new(),
             rolling: RollingStats::new(window_size),
             time_rolling: TimeRollingStats::new(time_window),
@@ -205,15 +205,20 @@ impl Column {
     }
 
     fn append(&mut self, x: f64, ts: i64) {
+        self.last = x;
         self.global.update(x);
         self.rolling.update(x);
         self.time_rolling.update(x, ts);
         self.ewma.update(x);
-        self.values.push(x);
     }
 
-    fn last(&self) -> f64 {
-        *self.values.last().unwrap_or(&0.0)
+    fn zscore(&self) -> f64 {
+        let std = self.rolling.std();
+        if std == 0.0 {
+            return 0.0;
+        }
+
+        (self.last - self.rolling.mean()) / std
     }
 }
 
@@ -226,6 +231,13 @@ impl Column {
 #[pyclass]
 struct StreamFrame {
     columns: HashMap<String, Column>,
+}
+
+// INTERNAL (Rust only)
+impl StreamFrame {
+    fn get_col(&self, col: &str) -> &Column {
+        self.columns.get(col).expect("Column does not exist")
+    }
 }
 
 #[pymethods]
@@ -243,46 +255,55 @@ impl StreamFrame {
 
     fn append(&mut self, row: HashMap<String, f64>, ts: i64) {
         for (key, value) in row {
-            if let Some(col) = self.columns.get_mut(&key) {
-                col.append(value, ts);
+            match self.columns.get_mut(&key) {
+                Some(col) => col.append(value, ts),
+                None => panic!("Column '{}' does not exist", key),
             }
         }
     }
 
     // GLOBAL
     fn mean(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.global.mean).unwrap_or(0.0)
+        self.get_col(&col).global.mean
     }
 
     fn variance(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.global.variance()).unwrap_or(0.0)
+        self.get_col(&col).global.variance()
+    }
+
+    fn last(&self, col: String) -> f64 {
+        self.get_col(&col).last
     }
 
     // COUNT
     fn rolling_mean(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.rolling.mean()).unwrap_or(0.0)
+        self.get_col(&col).rolling.mean()
     }
 
     fn rolling_std(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.rolling.std()).unwrap_or(0.0)
+        self.get_col(&col).rolling.std()
+    }
+
+    fn zscore(&self, col: String) -> f64 {
+        self.get_col(&col).zscore()
     }
 
     // TIME
     fn time_mean(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.time_rolling.mean()).unwrap_or(0.0)
+        self.get_col(&col).time_rolling.mean()
     }
 
     fn time_std(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.time_rolling.std()).unwrap_or(0.0)
+        self.get_col(&col).time_rolling.std()
     }
 
     fn rate(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.time_rolling.rate()).unwrap_or(0.0)
+        self.get_col(&col).time_rolling.rate()
     }
 
     // TREND
     fn ewma(&self, col: String) -> f64 {
-        self.columns.get(&col).map(|c| c.ewma.get()).unwrap_or(0.0)
+        self.get_col(&col).ewma.get()
     }
 }
 

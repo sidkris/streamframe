@@ -78,20 +78,18 @@ for i in range(ITERATIONS):
     rolling_std = sf.rolling_std("latency")
 
     time_mean = sf.time_mean("latency")
-    time_std = sf.time_std("latency")       # NEW
-    rate = sf.rate("latency")               # NEW
+    time_std = sf.time_std("latency")
+    rate = sf.rate("latency")
 
     ewma = sf.ewma("latency")
 
     global_mean = sf.mean("latency")
     variance = sf.variance("latency")
 
-    error_rate = sf.time_mean("errors")
+    last = sf.last("latency")
+    z = sf.zscore("latency")
 
-    # ---- z-score ----
-    z = 0
-    if rolling_std > 0:
-        z = (latency - rolling_mean) / rolling_std
+    error_rate = sf.time_mean("errors")
 
     # ---- trend direction ----
     trend = "-"
@@ -109,6 +107,10 @@ for i in range(ITERATIONS):
     print("Real-time feature computation over streaming data\n")
 
     print(f"[t={i}] latency: {latency:.2f} ms {bar(latency)}")
+
+    print("\n--- CURRENT ---")
+    print(f"last      : {last:.2f}")
+    print(f"z-score   : {z:.2f}")
 
     print("\n--- GLOBAL (lifetime stats) ---")
     print(f"mean      : {global_mean:.2f}")
@@ -142,6 +144,6 @@ for i in range(ITERATIONS):
         print("🚨 high error rate")
 
     print("\n--- DEBUG ---")
-    print(f"z-score : {z:.2f}")
+    print(f"raw latency : {latency:.2f}")
 
     time.sleep(0.2)
