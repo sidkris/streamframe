@@ -1,0 +1,1 @@
+streamframe is a lightweight engine for computing real-time features over streaming data in constant time.
