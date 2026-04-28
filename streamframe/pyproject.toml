@@ -14,3 +14,5 @@ dynamic = ["version"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "streamframe"
+version = "0.1.0"
+description = "Real-time feature computation engine for streaming data"
