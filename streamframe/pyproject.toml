@@ -4,15 +4,25 @@ build-backend = "maturin"
 
 [project]
 name = "streamframe"
+version = "0.1.1"  
+description = "Real-time feature computation engine for streaming data"
+readme = "README.md"
 requires-python = ">=3.8"
+
+authors = [
+  { name = "Sid" }
+]
+
+keywords = ["streaming", "real-time", "analytics", "feature-engineering"]
+
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
 ]
-dynamic = ["version"]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "streamframe"
-version = "0.1.0"
-description = "Real-time feature computation engine for streaming data"
